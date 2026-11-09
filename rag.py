@@ -30,6 +30,7 @@ class Route(IntEnum):
     STANDALONE = 1
     FOLLOW_UP = 2
     MULTIPLE = 3 
+    BLOCKED = 4
 
 
 class RAG:
@@ -79,6 +80,9 @@ class RAG:
             history = []
 
         route, fell_back = router(self.gen, query, history=history)
+
+        if route.type == Route.BLOCKED:
+            return {"answer": "I can't help with that request.", "sources": []}
 
         if route.type == Route.NO_RETRIEVAL: 
             prompt = build_prompt(RAG_SYSTEM_PROMPT, query, history=history)

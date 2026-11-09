@@ -21,7 +21,7 @@ A document question answering API built on Retrieval-Augmented Generation. Uploa
 flowchart LR
     F(["Upload (admin)"]) --> P["Docling<br/>parse"]
     P --> C["Hybrid chunker"]
-    C --> E["embeddings<br/>(dense)"]
+    C --> E["embeddings"]
     E --> S[("Qdrant docs<br/>dense + BM25 sparse")]
     S --> X["Clear semantic cache"]
 ```
@@ -30,7 +30,7 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    Q(["Question"]) --> R{"Router<br/>(reads chat history)"}
+    Q(["Question"]) --> R{"Router"}
     R -- blocked --> REF(["Refuse"])
     R -- chitchat --> CHAT["LLM replies<br/>no retrieval"]
     R -- "standalone / follow-up" --> CACHE{"Semantic cache<br/>hit?"}

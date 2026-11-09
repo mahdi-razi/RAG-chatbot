@@ -4,10 +4,10 @@ A document question answering API built on Retrieval-Augmented Generation. Uploa
 
 ## Features
 
-- **Document ingestion**: parses PDF, DOCX, PPTX, XLSX, HTML, Markdown and CSV with [Docling](https://github.com/docling-project/docling) and splits them into structure-aware chunks
+- **Document ingestion**: parses with [Docling](https://github.com/docling-project/docling) and splits them into structure-aware chunks
 - **Hybrid search**: dense embeddings plus BM25 sparse vectors in Qdrant, fused with RRF
 - **Reranking**: cross encoder reorders the retrieved chunks
-- **Query router**: classifies each message (chitchat, standalone, follow-up, multi-question) and rewrites follow-ups into standalone queries
+- **Query router**: classifies each message (chitchat, standalone, follow-up, multi-question, blocked) and rewrites follow-ups into standalone queries
 - **Chat history**: per-session history stored in Redis
 - **Semantic cache**: similar questions are answered from cache
 - **Local LLM**: Qwen3-8B-AWQ served by vLLM through an OpenAI-compatible API
@@ -15,13 +15,60 @@ A document question answering API built on Retrieval-Augmented Generation. Uploa
 
 ## Architecture
 
+### Ingestion
+
+```mermaid
+flowchart LR
+    F(["Upload (admin)"]) --> P["Docling<br/>parse"]
+    P --> C["Hybrid chunker"]
+    C --> E["embeddings<br/>(dense)"]
+    E --> S[("Qdrant docs<br/>dense + BM25 sparse")]
+    S --> X["Clear semantic cache"]
 ```
-question ─► router ─► cache lookup ─► hybrid search (Qdrant) ─► rerank ─► LLM ─► answer + sources
-               │                                                                      │
-          chat history (Redis)                                                  save to cache/history
+
+### Answering a question
+
+```mermaid
+flowchart TD
+    Q(["Question"]) --> R{"Router<br/>(reads chat history)"}
+    R -- blocked --> REF(["Refuse"])
+    R -- chitchat --> CHAT["LLM replies<br/>no retrieval"]
+    R -- "standalone / follow-up" --> CACHE{"Semantic cache<br/>hit?"}
+    R -- "multiple questions<br/>split into sub-queries" --> SEARCH
+    CACHE -- yes --> ANS
+    CACHE -- no --> SEARCH["Hybrid search per query<br/>dense + BM25, RRF"]
+    SEARCH --> RERANK["Cross-encoder rerank"]
+    RERANK -- no chunks --> NF(["'Couldn't find' reply"])
+    RERANK -- chunks --> GEN["LLM answers<br/>and picks used chunks"]
+    GEN --> ANS(["Answer + sources"])
+    CHAT --> ANS
+
+    ANS -.-> HIST[("Redis<br/>history")]
+    NF -.-> HIST
+    ANS -.->|"standalone / follow-up only,<br/>if chunks were used"| CW[("Qdrant<br/>semantic cache")]
 ```
 
 Services (see `docker-compose.yml`): `app` (FastAPI), `vllm`, `qdrant`, `redis`.
+
+
+## Project Structure
+
+| File | Purpose |
+|---|---|
+| `main.py` | FastAPI app, auth and endpoints |
+| `rag.py` | Orchestrates ingestion and question answering |
+| `parser.py` | Document parsing |
+| `chunker.py` | Hybrid chunking sized for the embedding model's tokenizer |
+| `embedder.py` | Embeddings |
+| `vector_store.py` | Qdrant collection with dense + sparse hybrid search |
+| `reranker.py` | reranking |
+| `router.py` | Query classification and rewriting |
+| `generator.py` | LLM client (vLLM via OpenAI API) |
+| `semantic_cache.py` | Semantic answer cache in Qdrant |
+| `history.py` | Chat history in Redis |
+| `prompts.py` | System prompts |
+| `helper.py` | Prompt building and structured-output schema |
+| `errors.py` | Custom exceptions |
 
 
 ## Getting Started
@@ -98,22 +145,3 @@ Remove a document and all its chunks. Header: `X-Admin-Key`. URL-encode filename
 curl -X DELETE http://localhost:8080/documents/report.pdf \
   -H "X-Admin-Key: $ADMIN_KEY"
 ```
-
-## Project Structure
-
-| File | Purpose |
-|---|---|
-| `main.py` | FastAPI app, auth and endpoints |
-| `rag.py` | Orchestrates ingestion and question answering |
-| `parser.py` | Document parsing |
-| `chunker.py` | Hybrid chunking sized for the embedding model's tokenizer |
-| `embedder.py` | Embeddings |
-| `vector_store.py` | Qdrant collection with dense + sparse hybrid search |
-| `reranker.py` | reranking |
-| `router.py` | Query classification and rewriting |
-| `generator.py` | LLM client (vLLM via OpenAI API) |
-| `semantic_cache.py` | Semantic answer cache in Qdrant |
-| `history.py` | Chat history in Redis |
-| `prompts.py` | System prompts |
-| `helper.py` | Prompt building and structured-output schema |
-| `errors.py` | Custom exceptions |
